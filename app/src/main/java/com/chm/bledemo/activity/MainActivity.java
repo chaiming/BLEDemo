@@ -114,9 +114,8 @@ public class MainActivity extends BaseActivity {
     public void onViewClicked(View view) {
         switch (view.getId()) {
             case R.id.btn_new:
-                scanDevices(true);
                 mListAdspter.clear();
-                mListAdspter.notifyDataSetChanged();
+                scanDevices(true);
                 break;
         }
     }
@@ -189,7 +188,6 @@ public class MainActivity extends BaseActivity {
             if (ContextCompat.checkSelfPermission(this,
                     Manifest.permission.ACCESS_COARSE_LOCATION)
                     != PackageManager.PERMISSION_GRANTED) {
-                //Android 6.0 动态申请权限
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,
                                 Manifest.permission.ACCESS_FINE_LOCATION},

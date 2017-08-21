@@ -72,10 +72,10 @@ public class BleController {
     //此属性一般不用修改
     private static final String BLUETOOTH_NOTIFY_D = "00002902-0000-1000-8000-00805f9b34fb";
     //TODO 以下uuid根据公司硬件改变
-    public static final String UUID_SERVICE = "0f0e0d0c-0b0a-0908-0706-050403020100";
+    public static final String UUID_SERVICE = "0000fff0-0000-1000-8000-00805f9b34fb";
     public static final String UUID_INDICATE = "0000000-0000-0000-8000-00805f9b0000";
-    public static final String UUID_NOTIFY = "3f3e3d3c-3b3a-3938-3736-353433323130";
-    public static final String UUID_WRITE = "3f3e3d3c-3b3a-3938-3736-353433323130";
+    public static final String UUID_NOTIFY = "0000fff3-0000-1000-8000-00805f9b34fb";
+    public static final String UUID_WRITE = "0000fff3-0000-1000-8000-00805f9b34fb";
     public static final String UUID_READ = "3f3e3d3c-3b3a-3938-3736-353433323130";
 
     public static synchronized BleController getInstance() {
@@ -160,18 +160,17 @@ public class BleController {
      * @param connectCallback   连接回调
      */
     public void Connect(final int connectionTimeOut, final String address, ConnectCallback connectCallback) {
-        BluetoothDevice remoteDevice = mBleAdapter.getRemoteDevice(address);
-        if (null == address) {
+
+        if (mBleAdapter == null || address == null) {
             Log.e(TAG, "No device found at this address：" + address);
+            return ;
+        }
+        BluetoothDevice remoteDevice = mBleAdapter.getRemoteDevice(address);
+        if (remoteDevice == null) {
+            Log.w(TAG, "Device not found.  Unable to connect.");
             return;
         }
-
         this.connectCallback = connectCallback;
-        if (null != mBleGatt) {
-            mBleGatt.close();
-        }
-
-        reset();
         mBleGatt = remoteDevice.connectGatt(mContext, false, mGattCallback);
         Log.e(TAG, "connecting mac-address:" + address);
         delayConnectResponse(connectionTimeOut);
@@ -312,7 +311,9 @@ public class BleController {
 
             if (newState == BluetoothProfile.STATE_CONNECTED) { //连接成功
                 isMybreak = false;
+                isConnectok = true;
                 mBleGatt.discoverServices();
+                connSuccess();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {   //断开连接
                 if (!isMybreak) {
                     reConnect();
@@ -334,17 +335,13 @@ public class BleController {
                     List<BluetoothGattCharacteristic> characteristics = bluetoothGattService.getCharacteristics();
                     for (int j = 0; j < characteristics.size(); j++) {
                         charMap.put(characteristics.get(j).getUuid().toString(), characteristics.get(j));
-                        if (characteristics.get(j).getUuid().toString().equals(UUID_NOTIFY)) {
-                            if (enableNotification(true, characteristics.get(j))) {
-                                isConnectok = true;
-                                connSuccess();
-                            } else {
-                                reConnect();
-                            }
-                        }
                     }
                     servicesMap.put(serviceUuid, charMap);
                 }
+                BluetoothGattCharacteristic NotificationCharacteristic=getBluetoothGattCharacteristic(UUID_SERVICE,UUID_NOTIFY);
+                if (NotificationCharacteristic==null)
+                    return;
+                enableNotification(true,NotificationCharacteristic);
             }
         }
 
@@ -358,12 +355,44 @@ public class BleController {
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicWrite(gatt, characteristic, status);
+            if (null != writeCallback) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    runOnMainThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            writeCallback.onSuccess();
+                        }
+                    });
+                    Log.e(TAG, "Send data success!");
+                } else {
+                    runOnMainThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            writeCallback.onFailed(OnWriteCallback.FAILED_OPERATION);
+                        }
+                    });
+                    Log.e(TAG, "Send data failed!");
+                }
+            }
         }
 
         //通知数据
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             super.onCharacteristicChanged(gatt, characteristic);
+            if (null != mReceiverRequestQueue) {
+                HashMap<String, OnReceiverCallback> map = mReceiverRequestQueue.getMap();
+                final byte[] rec = characteristic.getValue();
+                for (String key : mReceiverRequestQueue.getMap().keySet()) {
+                    final OnReceiverCallback onReceiverCallback = map.get(key);
+                    runOnMainThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            onReceiverCallback.onReceiver(rec);
+                        }
+                    });
+                }
+            }
         }
 
         @Override
@@ -395,6 +424,15 @@ public class BleController {
         }
         return mBleGatt.writeDescriptor(clientConfig);
     }
+
+    public BluetoothGattService getService(UUID uuid) {
+        if (mBleAdapter == null || mBleGatt == null) {
+            Log.e(TAG, "BluetoothAdapter not initialized");
+            return null;
+        }
+        return mBleGatt.getService(uuid);
+    }
+
 
     /**
      * 根据服务UUID和特征UUID,获取一个特征{@link BluetoothGattCharacteristic}
